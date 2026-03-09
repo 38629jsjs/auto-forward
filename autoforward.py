@@ -3,6 +3,7 @@ import asyncio
 import threading
 import pytz
 import re
+import time
 from datetime import datetime
 from pyrogram import Client, errors
 from telebot import TeleBot, types
@@ -18,12 +19,15 @@ STRING_SESSION = os.getenv("STRING_SESSION", "").strip()
 MY_ID_RAW = os.getenv("MY_ID", "")
 AUTHORIZED_USERS = [int(i.strip()) for i in MY_ID_RAW.split(",") if i.strip()]
 
+# FIX: Load initial targets from Koyeb Environment variables so it's not empty
+TARGET_GROUPS_RAW = os.getenv("TARGET_GROUPS", "")
+TARGET_GROUPS = [g.strip() for g in re.split(r'[,\n]', TARGET_GROUPS_RAW) if g.strip()]
+
 # ==========================================
 # SECTION 2: INITIALIZATION
 # ==========================================
 AD_RUNNING = False
-TARGET_GROUPS = [] # Now starts empty; update via bot
-USER_ADS = {}      # Stores {user_id: {"chat_id": x, "message_id": y}}
+USER_ADS = {}  # Stores {user_id: {"chat_id": x, "message_id": y}}
 PP_TIMEZONE = pytz.timezone("Asia/Phnom_Penh")
 
 bot = TeleBot(BOT_TOKEN)
@@ -72,6 +76,7 @@ async def advertising_loop():
                         await asyncio.sleep(15) # Safety delay
 
                     except errors.FloodWait as e:
+                        print(f"⚠️ Rate limited. Sleeping {e.value}s")
                         await asyncio.sleep(e.value)
                     except Exception as e:
                         print(f"❌ Failed {target}: {str(e)}")
@@ -151,5 +156,24 @@ def handle_control(message):
         status = "🟢 RUNNING" if AD_RUNNING else "🔴 IDLE"
         bot.reply_to(message, f"**Status:** {status}\n**Active Ads:** {len(USER_ADS)}\n**Groups:** {len(TARGET_GROUPS)}")
 
+# ==========================================
+# SECTION 5: KOYEB COMPATIBILITY STARTUP
+# ==========================================
 if __name__ == "__main__":
-    bot.infinity_polling(skip_pending=True)
+    # 1. Mandatory delay to let Koyeb kill the old instance
+    print("⏳ [System] Waiting 20s for previous session to clear...")
+    time.sleep(20)
+
+    print("🤖 [System] Vinzy Bot is now connecting to Telegram...")
+    
+    while True:
+        try:
+            # 2. Start polling with conflict protection
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
+        except Exception as e:
+            if "Conflict" in str(e):
+                print("⚠️ [Conflict] Another instance is still alive. Retrying in 20s...")
+                time.sleep(20)
+            else:
+                print(f"❌ [Error] {e}")
+                time.sleep(5)
