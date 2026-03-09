@@ -2,7 +2,6 @@ import os
 import asyncio
 import threading
 import pytz
-import time
 from datetime import datetime
 from pyrogram import Client, errors
 from telebot import TeleBot, types
@@ -15,7 +14,7 @@ API_HASH = os.getenv("API_HASH", "").strip()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 STRING_SESSION = os.getenv("STRING_SESSION", "").strip()
 
-# --- FIXED: Support for Multiple Admin IDs ---
+# Support for Multiple Admin IDs
 MY_ID_RAW = os.getenv("MY_ID", "")
 AUTHORIZED_USERS = [int(i.strip()) for i in MY_ID_RAW.split(",") if i.strip()]
 
@@ -52,22 +51,22 @@ async def advertising_loop(from_chat_id, message_id):
             for group in TARGET_GROUPS:
                 if not AD_RUNNING: break
                 try:
-                    # FIXED: Resolve the chat first to prevent 'ID not found'
-                    chat = await user_app.get_chat(group)
+                    # FIX 1: Resolve the peer first
+                    chat_peer = await user_app.resolve_peer(group)
                     
-                    # FIXED: Send the copy using the resolved chat ID
+                    # FIX 2: Copy the message using the resolved peer
                     await user_app.copy_message(
-                        chat_id=chat.id, 
+                        chat_id=group, 
                         from_chat_id=from_chat_id, 
                         message_id=message_id
                     )
                     print(f"✅ Sent to {group}")
-                    await asyncio.sleep(20) 
+                    await asyncio.sleep(20) # Spam protection
                 except errors.FloodWait as e:
-                    print(f"⚠️ FloodWait: Sleeping {e.value}s")
+                    print(f"⚠️ Flood Wait: Sleeping {e.value}s")
                     await asyncio.sleep(e.value)
                 except Exception as e:
-                    print(f"❌ Error for {group}: {str(e)}")
+                    print(f"❌ Failed for {group}: {str(e)}")
 
             print(f"[{now}] ⏳ Round Complete. Waiting 1 hour...")
             for _ in range(3600):
@@ -80,7 +79,7 @@ def start_ad_thread(c_id, m_id):
     loop.run_until_complete(advertising_loop(c_id, m_id))
 
 # ==========================================
-# SECTION 4: BOT CONTROL INTERFACE
+# SECTION 4: BOT INTERFACE
 # ==========================================
 
 def get_main_menu():
@@ -91,13 +90,11 @@ def get_main_menu():
 
 @bot.message_handler(commands=['start'])
 def welcome(message):
-    # FIXED: Check if the user is in the authorized list
     if message.from_user.id not in AUTHORIZED_USERS:
-        bot.reply_to(message, "🚫 Unauthorized Access.")
         return
     bot.send_message(
         message.chat.id, 
-        "🇰🇭 **Vinzy Ad Master (Phnom Penh)**\nReady for you and your team.",
+        "🇰🇭 **Vinzy Multi-Admin Active**\n1. Set Ad\n2. Start Processing",
         reply_markup=get_main_menu(),
         parse_mode="Markdown"
     )
@@ -105,14 +102,14 @@ def welcome(message):
 @bot.message_handler(func=lambda m: m.text == "📤 Set New Ad")
 def ask_for_ad(message):
     if message.from_user.id not in AUTHORIZED_USERS: return
-    msg = bot.send_message(message.chat.id, "📍 **Forward the ad you want to send here.**")
+    msg = bot.send_message(message.chat.id, "📍 **Forward the ad here now.**")
     bot.register_next_step_handler(msg, save_forwarded_ad)
 
 def save_forwarded_ad(message):
     global SAVED_MESSAGE
-    # FIXED: Re-saving ensures both admins are using the latest ad
+    # We save the exact message details to ensure it isn't "empty"
     SAVED_MESSAGE = {"chat_id": message.chat.id, "message_id": message.message_id}
-    bot.reply_to(message, "✅ **Ad Saved Successfully!**")
+    bot.reply_to(message, "✅ **Ad Saved!** Both admins can now start the process.")
 
 @bot.message_handler(func=lambda m: True)
 def handle_control(message):
@@ -129,9 +126,9 @@ def handle_control(message):
                 args=(SAVED_MESSAGE['chat_id'], SAVED_MESSAGE['message_id']), 
                 daemon=True
             ).start()
-            bot.reply_to(message, "🚀 **Live!** Processing started.")
+            bot.reply_to(message, "🚀 **Live!** Posting to groups...")
         else:
-            bot.reply_to(message, "⚠️ System already active.")
+            bot.reply_to(message, "⚠️ System is already active.")
 
     elif message.text == "🛑 Stop Ads":
         AD_RUNNING = False
@@ -143,4 +140,5 @@ def handle_control(message):
 
 if __name__ == "__main__":
     print("🤖 Vinzy Bot is polling...")
+    # skip_pending=True helps with the 409 Conflict error
     bot.infinity_polling(skip_pending=True)
